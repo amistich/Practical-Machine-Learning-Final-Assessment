@@ -1,0 +1,196 @@
+---
+title: "Practical Machine Learning Prediction Assignment"
+author: "Ashley Mistichelli"
+date: "4/19/2022"
+output:
+  html_document: default
+  word_document: default
+---
+
+
+## Research Question
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set.
+
+## Downloading the Data
+
+The training and testing data that will be used to complete this project can be found at the following links:
+
+Training: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+Testing: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+To import the data:
+
+```{r}
+
+file.for.training.data   <- '~/Data/pml-training.csv'
+# url.for.training.data   <- 'http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+file.for.testing.data <- '~/Data/pml-testing.csv'
+# url.for.testing.data  <- 'http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+# download.file(url.for.training.data,file.for.training.data)
+# download.file(url.for.testing.data,file.for.testing.data)
+
+
+```
+
+## Cleaning the Data
+
+In this section, the data is cleaned and prepared for model usage. Values labeled within the data set as "NA," "#DIV/0!," or left blank will be converted to "NA" values, and then will be removed from the data set. Furthermore, the outcome variable, classe, is a factor variable with 5 variables. Therefore, it will be ensured that RStudio recognizes the values of classe as a factors rather than characters. Finally, irrelevant columns, such as user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, and num_window will be removed.
+
+```{r}
+
+# replacing "NA," "#DIV/0!," and blank obsercations with "NA"
+pml_training <-read.csv(file.for.training.data, na.strings=c("NA","#DIV/0!", ""))
+pml_testing <-read.csv(file.for.testing.data , na.strings=c("NA", "#DIV/0!", ""))
+
+# removing all "NA" values
+pml_training<-pml_training[,colSums(is.na(pml_training)) == 0]
+pml_testing <-pml_testing[,colSums(is.na(pml_testing)) == 0]
+
+# labeling classe as a factor variable
+pml_training$classe <- as.factor(pml_training$classe)
+
+# removing irrelevant variables
+pml_training <- pml_training[,-c(1:7)]
+pml_testing <- pml_testing[,-c(1:7)]
+
+```
+
+## Cross-Validation
+
+Cross-validation will be performed in this section with 60% of the training data being allocated towards training and 40% of the training data being allocated towards testing the model's accuracy. A seed will also be set so that the following models' results can be reproduced. 
+
+```{r}
+
+# loading necessary libraries
+
+library(caret)
+library(rpart)
+library(randomForest)
+library(parallel)
+library(doParallel)
+
+set.seed(1999)
+trainingIndices <- createDataPartition(y =pml_training$classe, p = 0.6, list = FALSE)
+training <- pml_training[trainingIndices,]
+testing <- pml_training[-trainingIndices,]
+
+```
+
+##  Random Forest Model
+
+In this section, a random forest model will be built. This model will be parallelized to reduce the CPU runtime. A confusion matrix will then be produced to assess the model’s accuracy and compute the expected out-of-sample error.
+
+```{r}
+
+# beginning parallelization 
+startParallel <- function()
+{
+  cluster <- makeCluster(detectCores()-1)
+  registerDoParallel(cluster)
+  return(list("cluster" = cluster, "time" = Sys.time()))
+}
+
+endParallel <- function(parallelData)
+{
+  stopCluster(parallelData$cluster)
+  registerDoSEQ()
+  return(Sys.time() - parallelData$time)
+}
+
+parallel <- startParallel()
+
+# setting a seed to reproduce results
+set.seed(1999)
+
+# building the random forest model
+random_forest <- randomForest(classe ~ ., 
+                              data = training, 
+                              method = "rf", 
+                              trControl = trainControl(method = "cv", number = 10, allowParallel = TRUE))
+
+# ending of parallelization
+endParallel(parallel)
+
+# producing the confusion matrix
+random_forest_prediction <- predict(random_forest, testing, type = "class")
+confusionMatrix(random_forest_prediction, testing$classe)
+
+```
+
+##  Decision Tree Model
+
+In this section, a decision tree model will be built. This model will be parallelized to reduce the CPU runtime. A confusion matrix will then be produced to assess the model’s accuracy and compute the expected out-of-sample error.
+
+```{r}
+
+# beginning parallelization
+startParallel <- function()
+{
+  cluster <- makeCluster(detectCores()-1)
+  registerDoParallel(cluster)
+  return(list("cluster" = cluster, "time" = Sys.time()))
+}
+
+endParallel <- function(parallelData)
+{
+  stopCluster(parallelData$cluster)
+  registerDoSEQ()
+  return(Sys.time() - parallelData$time)
+}
+
+parallel <- startParallel()
+
+# setting a seed to reproduce results
+set.seed(1999)
+
+# building the decision tree model
+decision_tree <- rpart(classe ~ ., 
+                       data=training, 
+                       method="class",
+                       control = rpart.control(method = "cv", number = 10, allowParallel = TRUE))
+
+# ending parallelization
+endParallel(parallel)
+
+# producing the confusion matrix
+decision_tree_prediction <- predict(decision_tree, testing, type = "class")
+confusionMatrix(decision_tree_prediction, testing$classe)
+
+```
+
+## Results
+
+As shown by the accuracy of the confusion matrices, the Random Forest model outperformed the Decision Tree model. The Random Forest model produced an accuracy of 99.21% with an out-of-sample error of 0.79%, whereas the Decision Tree model of 74.37% with an out-of-sample error of 25.63%. Therefore, the Random Forest model will be used to predict the 20 out-of-sample cases provided in the testing data.
+
+Out-of-sample error is calculated 1 - accuracy for predictions made against the cross-validation set. Therefore, using the Random Forest model to predict the outcome for classe of the 20 out-of-sample cases, one would expect there to be no errors in prediction.
+
+## Random Forest Prediction 
+
+```{r}
+
+
+final_predictions_random_forest <- predict(random_forest, pml_testing, type = "class")
+final_predictions_random_forest
+
+```
+
+
+## Submission
+
+Preparing the file for submission 
+
+```{r}
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("~/Data/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(final_predictions_random_forest)
+
+
+```
